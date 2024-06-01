@@ -38,8 +38,8 @@ def clean_data(text):
     return text.replace('\xa0', ' ')
 
 
-def scrape_website(main_url, output_filename):
-    """Scrape the website and collects the required data."""
+def scrape_main_url(main_url, output_filename):
+    """Scrape districts code and name of the city."""
     logger.info('Requesting page.', url=main_url)
     try:
         response_from_main_url = requests.get(main_url)
@@ -51,33 +51,34 @@ def scrape_website(main_url, output_filename):
     except Exception as e:
         logger.error(f'An error occurred while retrieving page: {e}', url=main_url, error=str(e))
         raise e
-    soup = BeautifulSoup(response_from_main_url.text, 'html.parser')
-    codes = soup.find_all(class_='cislo')
-    locations = soup.find_all('td', class_='overflow_name')
-    collect_data(codes, locations, output_filename)
+    main_url_soup = BeautifulSoup(response_from_main_url.text, 'html.parser')
+    codes = main_url_soup.find_all(class_='cislo')
+    locations = main_url_soup.find_all('td', class_='overflow_name')
+    scrape_districts_data(codes, locations, output_filename)
 
 
-def collect_data(codes, locations, output_filename):
+def scrape_districts_data(codes, locations, output_filename):
+    """Scrape elections result from each district."""
     scraped_data = []
     for code, location in zip(codes, locations):
         code_text = code.text.strip()
         location_text = location.text.strip()
-        base_url = f'https://volby.cz/pls/ps2017nss/ps311?xjazyk=CZ&xkraj=12&xobec={code_text}&xvyber=7103'
+        districts_url = f'https://volby.cz/pls/ps2017nss/ps311?xjazyk=CZ&xkraj=12&xobec={code_text}&xvyber=7103'
         try:
-            response_from_base_url = requests.get(base_url)
-            response_from_base_url.raise_for_status()
-            logger.info('Page retrieved.', url=base_url, status_code=response_from_base_url.status_code)
+            response_from_districts_url = requests.get(districts_url)
+            response_from_districts_url.raise_for_status()
+            logger.info('Page retrieved.', url=districts_url, status_code=response_from_districts_url.status_code)
         except requests.exceptions.HTTPError as e:
-            logger.error(f'HTTP error occurred for code {code_text}:', url=base_url, error=str(e))
+            logger.error(f'HTTP error occurred for code {code_text}:', url=districts_url, error=str(e))
             raise e
         except Exception as e:
-            logger.error(f'Other error occurred for code {code_text}: {e}', url=base_url, error=str(e))
+            logger.error(f'Other error occurred for code {code_text}: {e}', url=districts_url, error=str(e))
             continue
-        soup_2 = BeautifulSoup(response_from_base_url.text, 'html.parser')
+        districts_url_soup = BeautifulSoup(response_from_districts_url.text, 'html.parser')
         try:
-            envelopes = soup_2.find('td', class_='cislo', headers='sa3').text
-            registered = soup_2.find('td', class_='cislo', headers='sa2').text
-            valid = soup_2.find('td', class_='cislo', headers='sa6').text
+            envelopes = districts_url_soup.find('td', class_='cislo', headers='sa3').text
+            registered = districts_url_soup.find('td', class_='cislo', headers='sa2').text
+            valid = districts_url_soup.find('td', class_='cislo', headers='sa6').text
 
             # Cleaning the extracted values from NBSC
             cleaned_envelopes = clean_data(envelopes)
@@ -106,7 +107,7 @@ def main(main_url, output_filename):
     if not output_filename.endswith('.csv'):
         sys.exit('Invalid filename. Output filename must end with .csv')
     try:
-        scrape_website(main_url, output_filename)
+        scrape_main_url(main_url, output_filename)
     except Exception as e:
         sys.exit(e)
 
