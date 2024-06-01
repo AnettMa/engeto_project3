@@ -54,9 +54,11 @@ def scrape_website(main_url, output_filename):
     soup = BeautifulSoup(response_from_main_url.text, 'html.parser')
     codes = soup.find_all(class_='cislo')
     locations = soup.find_all('td', class_='overflow_name')
+    collect_data(codes, locations, output_filename)
 
+
+def collect_data(codes, locations, output_filename):
     scraped_data = []
-
     for code, location in zip(codes, locations):
         code_text = code.text.strip()
         location_text = location.text.strip()
@@ -64,7 +66,7 @@ def scrape_website(main_url, output_filename):
         try:
             response_from_base_url = requests.get(base_url)
             response_from_base_url.raise_for_status()
-            logger.info('Page retrieved.', url=base_url, status_code=response_from_main_url.status_code)
+            logger.info('Page retrieved.', url=base_url, status_code=response_from_base_url.status_code)
         except requests.exceptions.HTTPError as e:
             logger.error(f'HTTP error occurred for code {code_text}:', url=base_url, error=str(e))
             raise e
@@ -81,7 +83,6 @@ def scrape_website(main_url, output_filename):
             cleaned_envelopes = clean_data(envelopes)
             cleaned_registered = clean_data(registered)
             cleaned_valid = clean_data(valid)
-
             scraped_data.append({'Code': code_text, 'Location': location_text, 'Envelopes': cleaned_envelopes,
                                  'Registered': cleaned_registered, 'Valid': cleaned_valid})
         except AttributeError as e:
@@ -98,7 +99,7 @@ def main(main_url, output_filename):
     """To run this script please use 2 arguments separated by space:
 
     URL in format: 'https://volby.cz/pls/ps2017nss/ps311?xjazyk=CZ&xkraj=2&xnumnuts=2101'
-    
+
     and name of CSV file in format: 'name.csv'"""
     if not validators.url(main_url):
         sys.exit('Invalid URL. Please provide valid URL.')
