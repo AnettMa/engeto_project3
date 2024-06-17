@@ -68,44 +68,45 @@ def extract_href_values(soup):
     ]
 
 
-def scrape_data(codes, locations, flattened_url_list, output_filename):
+def scrape_data(codes, locations, urls, output_filename):
     scraped_data = []
     for code, location in zip(codes, locations):
         code_text = code.text.strip()
         location_text = location.text.strip()
-        for url in flattened_url_list:
-            logger.info('Requesting page.', url=url)
-            response_from_url = fetch_page(url)
-            districts_url_soup = BeautifulSoup(response_from_url.text, 'html.parser')
-            envelopes = districts_url_soup.find('td', class_='cislo', headers='sa3').text
-            registered = districts_url_soup.find('td', class_='cislo', headers='sa2').text
-            valid_votes = districts_url_soup.find('td', class_='cislo', headers='sa6').text
+        scraped_data.append({'Code': code_text, 'Location': location_text})
 
-            cleaned_envelopes = clean_data(envelopes)
-            cleaned_registered = clean_data(registered)
-            cleaned_valid_votes = clean_data(valid_votes)
+    for url in urls:
+        logger.info('Requesting page.', url=url)
+        response_from_url = fetch_page(url)
+        districts_url_soup = BeautifulSoup(response_from_url.text, 'html.parser')
+        envelopes = districts_url_soup.find('td', class_='cislo', headers='sa3').text
+        registered = districts_url_soup.find('td', class_='cislo', headers='sa2').text
+        valid_votes = districts_url_soup.find('td', class_='cislo', headers='sa6').text
 
-            party_details = {}
-            for table_idx, parties_div in enumerate(districts_url_soup.find_all('div', class_='t2_470'), start=1):
-                for party_row in parties_div.find_all('tr'):
-                    # Skip header and empty row
-                    if party_row.find('th') or \
-                            party_row.find('td', class_='hidden_td', headers=f't{table_idx}sa1 t{table_idx}sb1'):
-                        continue
+        cleaned_envelopes = clean_data(envelopes)
+        cleaned_registered = clean_data(registered)
+        cleaned_valid_votes = clean_data(valid_votes)
 
-                    party_name = party_row.find('td', class_='overflow_name').text
-                    party_count = party_row.find('td', class_='cislo', headers=f't{table_idx}sa2 t{table_idx}sb3').text
+        party_details = {}
+        for table_idx, parties_div in enumerate(districts_url_soup.find_all('div', class_='t2_470'), start=1):
+            for party_row in parties_div.find_all('tr'):
+                # Skip header and empty row
+                if party_row.find('th') or \
+                        party_row.find('td', class_='hidden_td', headers=f't{table_idx}sa1 t{table_idx}sb1'):
+                    continue
 
-                    party_details[party_name] = party_count
+                party_name = party_row.find('td', class_='overflow_name').text
+                party_count = party_row.find('td', class_='cislo', headers=f't{table_idx}sa2 t{table_idx}sb3').text
 
-            scraped_data.append({
-                'Code': code_text,
-                'Location': location_text,
-                'Envelopes': cleaned_envelopes,
-                'Registered': cleaned_registered,
-                'Valid': cleaned_valid_votes,
-                'party_details': party_details
-            })
+                party_details[party_name] = party_count
+
+        scraped_data.append({
+            'Envelopes': cleaned_envelopes,
+            'Registered': cleaned_registered,
+            'Valid': cleaned_valid_votes,
+            'party_details': party_details
+        })
+
     write_data_into_csv(scraped_data, output_filename)
 
 
