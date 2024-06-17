@@ -25,78 +25,47 @@ structlog.configure(
 logger = structlog.get_logger()
 
 
-def write_data_into_csv(scraped_data, filename):
-    """Write scraped data into a CSV file."""
-    party_names = list(scraped_data[0]['party_details'].keys())
-    fieldnames = ['Code', 'Location', 'Envelopes', 'Registered', 'Valid'] + party_names
-
-    # transform scraped_data list -> remove party_details dict and unpack it
-    for data in scraped_data:
-        party_details = data.pop('party_details', None)
-        if not party_details:
-            continue
-        data.update(**party_details)
-    with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(scraped_data)
-
-
-def clean_data(text):
-    """Clean data by replacing non-breaking space characters with regular spaces."""
-    return text.replace('\xa0', ' ')
-
-
 def scrape_main_url(main_url, output_filename):
     """Scrape URL from user - save code and name of the city + create list of URLs that should be scraped further."""
-    logger.info('Requesting page.', url=main_url)
-    try:
-        response_from_main_url = requests.get(main_url)
-        response_from_main_url.raise_for_status()
-        logger.info('Page retrieved.', url=main_url, status_code=response_from_main_url.status_code)
-    except requests.exceptions.HTTPError as e:
-        logger.info('HTTP error occurred while retrieving page.', url=main_url, error=str(e))
-        raise e
-    except Exception as e:
-        logger.error(f'An error occurred while retrieving page: {e}', url=main_url, error=str(e))
-        raise e
+    response_from_main_url = fetch_page(main_url)
     main_url_soup = BeautifulSoup(response_from_main_url.text, 'html.parser')
+
     codes = main_url_soup.find_all(class_='cislo')
     locations = main_url_soup.find_all('td', class_='overflow_name')
-    href_values = []
-    td_elements = main_url_soup.find_all('td', {'class': 'center', 'headers': 't1sa2'})
-    for td in td_elements:
-        a_tag = td.find('a')
-        if a_tag and 'href' in a_tag.attrs:
-            href_values.append(a_tag['href'])
-    urls = []
-    for value in href_values:
-        if 'xvyber' not in value:
-            okrsek_url = f'https://www.volby.cz/pls/ps2017nss/{value}'
-            logger.info('Requesting page.', url=okrsek_url)
-            try:
-                response_from_okrsek_url = requests.get(okrsek_url)
-                response_from_okrsek_url.raise_for_status()
-            except requests.exceptions.HTTPError as e:
-                logger.info('HTTP error occurred while retrieving page.', url=okrsek_url, error=str(e))
-                raise e
-            except Exception as e:
-                logger.error(f'An error occurred while retrieving page: {e}', url=main_url, error=str(e))
-                raise e
-            okrsek_url_soup = BeautifulSoup(response_from_okrsek_url.text, 'html.parser')
-            okrsek_href = [i['href'] for i in okrsek_url_soup.find_all('a', href=True)]
-            for okrsek in okrsek_href:
-                if 'okrsek' not in okrsek:
-                    continue
-                else:
-                    new_url = f'https://www.volby.cz/pls/ps2017nss/{okrsek}'
-                    urls.append(new_url)
-        else:
-            new_url = f'https://www.volby.cz/pls/ps2017nss/{value}'
-            urls.append(new_url)
+    href_values = extract_href_values(main_url_soup)
 
-    flattened_url_list = [item for sublist in urls for item in (sublist if isinstance(sublist, list) else [sublist])]
-    scrape_data(codes, locations, flattened_url_list, output_filename)
+    urls = []
+    for href_value in href_values:
+        urls.append(f'https://www.volby.cz/pls/ps2017nss/{href_value}')
+
+    scrape_data(codes, locations, urls, output_filename)
+
+
+def fetch_page(url):
+    """Fetch a page and return the response object."""
+    logger.info('Requesting page.', extra={'url': url})
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        logger.info('Page retrieved.', extra={'url': url, 'status_code': response.status_code})
+        return response
+    except requests.exceptions.HTTPError as e:
+        logger.error('HTTP error occurred while retrieving page.', extra={'url': url, 'error': str(e)})
+        raise e
+    except Exception as e:
+        logger.error(f'An error occurred while retrieving page: {e}', extra={'url': url, 'error': str(e)})
+        raise e
+
+
+def extract_href_values(soup):
+    """Extract href values from the soup object."""
+    headers_to_check = {'t1sa1', 't2sa1', 't3sa1'}
+    return [
+        a_tag['href']
+        for td in soup.find_all('td', {'class': 'cislo'})
+        if any(header in td.get('headers', '') for header in headers_to_check)
+        if (a_tag := td.find('a')) and 'href' in a_tag.attrs
+    ]
 
 
 def scrape_data(codes, locations, flattened_url_list, output_filename):
@@ -106,17 +75,7 @@ def scrape_data(codes, locations, flattened_url_list, output_filename):
         location_text = location.text.strip()
         for url in flattened_url_list:
             logger.info('Requesting page.', url=url)
-            try:
-                response_from_url = requests.get(url)
-                response_from_url.raise_for_status()
-                logger.info('Page retrieved.', url=url, status_code=response_from_url.status_code)
-            except requests.exceptions.HTTPError as e:
-                logger.info('HTTP error occurred while retrieving page.', url=url, error=str(e))
-                raise e
-            except Exception as e:
-                logger.error(f'An error occurred while retrieving page: {e}', url=url, error=str(e))
-                raise e
-
+            response_from_url = fetch_page(url)
             districts_url_soup = BeautifulSoup(response_from_url.text, 'html.parser')
             envelopes = districts_url_soup.find('td', class_='cislo', headers='sa3').text
             registered = districts_url_soup.find('td', class_='cislo', headers='sa2').text
@@ -148,6 +107,29 @@ def scrape_data(codes, locations, flattened_url_list, output_filename):
                 'party_details': party_details
             })
     write_data_into_csv(scraped_data, output_filename)
+
+
+def write_data_into_csv(scraped_data, filename):
+    """Write scraped data into a CSV file."""
+    party_names = list(scraped_data[0]['party_details'].keys())
+    fieldnames = ['Code', 'Location', 'Envelopes', 'Registered', 'Valid'] + party_names
+
+    # transform scraped_data list -> remove party_details dict and unpack it
+    for data in scraped_data:
+        party_details = data.pop('party_details', None)
+        if not party_details:
+            continue
+        data.update(**party_details)
+    with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(scraped_data)
+
+
+def clean_data(text):
+    """Clean data by replacing non-breaking space characters with regular spaces."""
+    return text.replace('\xa0', ' ')
+
 
 
 @click.command()
