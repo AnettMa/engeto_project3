@@ -69,22 +69,23 @@ def extract_href_values(soup):
 
 
 def scrape_data(codes, locations, urls, output_filename):
-    scraped_data = []
+    cities_locations_data = []
+    votes_data = []
     for code, location in zip(codes, locations):
         code_text = code.text.strip()
         location_text = location.text.strip()
-        scraped_data.append({'Code': code_text, 'Location': location_text})
+        cities_locations_data.append({'Code': code_text, 'Location': location_text})
 
     for url in urls:
         logger.info('Requesting page.', url=url)
         response_from_url = fetch_page(url)
         districts_url_soup = BeautifulSoup(response_from_url.text, 'html.parser')
-        envelopes = districts_url_soup.find('td', class_='cislo', headers='sa3').text
         registered = districts_url_soup.find('td', class_='cislo', headers='sa2').text
+        envelopes = districts_url_soup.find('td', class_='cislo', headers='sa3').text
         valid_votes = districts_url_soup.find('td', class_='cislo', headers='sa6').text
 
-        cleaned_envelopes = clean_data(envelopes)
         cleaned_registered = clean_data(registered)
+        cleaned_envelopes = clean_data(envelopes)
         cleaned_valid_votes = clean_data(valid_votes)
 
         party_details = {}
@@ -98,39 +99,52 @@ def scrape_data(codes, locations, urls, output_filename):
                 party_name = party_row.find('td', class_='overflow_name').text
                 party_count = party_row.find('td', class_='cislo', headers=f't{table_idx}sa2 t{table_idx}sb3').text
 
-                party_details[party_name] = party_count
+                cleaned_party_name = clean_data(party_name)
+                cleaned_party_count = clean_data(party_count)
+                party_details[cleaned_party_name] = cleaned_party_count
 
-        scraped_data.append({
-            'Envelopes': cleaned_envelopes,
+        votes_data.append({
             'Registered': cleaned_registered,
+            'Envelopes': cleaned_envelopes,
             'Valid': cleaned_valid_votes,
             'party_details': party_details
         })
 
-    write_data_into_csv(scraped_data, output_filename)
+    scraped_data_cleanup(cities_locations_data, votes_data, output_filename)
 
 
-def write_data_into_csv(scraped_data, filename):
-    """Write scraped data into a CSV file."""
-    party_names = list(scraped_data[0]['party_details'].keys())
-    fieldnames = ['Code', 'Location', 'Envelopes', 'Registered', 'Valid'] + party_names
+def scraped_data_cleanup(cities_locations_data, votes_data, output_filename):
+    party_names = list(votes_data[0]['party_details'].keys())
+    fieldnames = ['Code', 'Location', 'Registered', 'Envelopes', 'Valid'] + party_names
 
-    # transform scraped_data list -> remove party_details dict and unpack it
-    for data in scraped_data:
+    for data in votes_data:
         party_details = data.pop('party_details', None)
         if not party_details:
             continue
         data.update(**party_details)
-    with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+    combined_data = []
+    for city, vote in zip(cities_locations_data, votes_data):
+        combined_entry = {**city, **vote}
+        combined_data.append(combined_entry)
+
+    write_data_into_csv(combined_data, fieldnames, output_filename)
+
+
+def write_data_into_csv(combined_data, fieldnames, filename):
+    """Write scraped data into a CSV file."""
+
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+
         writer.writeheader()
-        writer.writerows(scraped_data)
+        for data in combined_data:
+            writer.writerow(data)
 
 
 def clean_data(text):
     """Clean data by replacing non-breaking space characters with regular spaces."""
     return text.replace('\xa0', ' ')
-
 
 
 @click.command()
